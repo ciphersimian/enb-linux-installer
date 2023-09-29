@@ -163,6 +163,7 @@ DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
 
 N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/Net-7"
 N7_WINE_INSTALL_PATH='C:\\Program Files\\Net-7'
+N7_LINUX_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
 N7_LAUNCHER_EXE='LaunchNet7.exe'
 N7_LAUNCHER_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_LAUNCHER_EXE}_wine_launcher.sh"
 N7_PROXY_EXE='net7proxy.exe'
@@ -421,6 +422,33 @@ install_extra_pkg()
     eval "${extra_install_command} ${extra_pkg}"
 }
 
+find_wine()
+{
+    if command -v /opt/wine-staging/bin/wine ; then
+        true
+    elif command -v wine ; then
+        true
+    else
+        false
+    fi
+}
+
+install_wine()
+{
+    if ! find_wine ; then
+        err "wine-staging is not installed, attempting to install wine-staging..."
+        if install_pkg wine-staging ; then
+            find_wine
+        else
+            error_exit "$(cat <<EOF
+Unable to install wine-staging, determine how to install it on your distro!
+winehq-* packages are not recommended, but may be the best option on your distro.
+EOF
+            )"
+        fi
+    fi
+}
+
 banner 'UNOFFICIAL LINUX INSTALL SCRIPT FOR THE NET-7 EARTH & BEYOND EMULATOR'
 
 banner 'WINE AND DEPENDENCIES INSTALL'
@@ -441,28 +469,29 @@ fi
 echo
 
 out "Check for wine-staging"
-if ! command -v wine ; then
-    out "wine-staging is not installed, attempting to install wine-staging..."
-    if install_pkg wine-staging ; then
-        command -v wine
-    else
-        error_exit "$(cat <<EOF
-Unable to install wine-staging, determine how to install it on your distro!
-winehq-* packages are not recommended, but may be the best option on your distro.
-EOF
-)"
-    fi
-fi
+WINE_EXEC=$(install_wine)
 echo
 
 out "Check for wine-gecko (needed by ${N7_LAUNCHER_EXE})"
 if ! is_extra_pkg_installed wine-gecko ; then
     out "wine-gecko is not installed, attempting to install wine-gecko..."
-    install_extra_pkg wine-gecko
+    install_extra_pkg wine-gecko || true
 
     if ! is_extra_pkg_installed wine-gecko ; then
-        error_exit "$(cat <<EOF
-Unable to install wine-gecko, determine how to install wine-gecko on your distro!
+        # failing to find a wine-gecko package, preload the msi installer in the wine cache
+        GECKO_VERSION="$(curl --fail --silent --show-error --location \
+            'https://source.winehq.org/git/wine.git/blob_plain/HEAD:/dlls/appwiz.cpl/addons.c' \
+            | grep '#define GECKO_VERSION' | sed -E 's/.*"(.*)".*/\1/')"
+        WINE_CACHE="${HOME}/.cache/wine"
+        if [ ! -w "${WINE_CACHE}" ] ; then
+            if ! mkdir -p "${WINE_CACHE}" ; then
+                error_exit "Could not install wine-gecko nor a usable wine cache (${WINE_CACHE})!"
+            fi
+        fi
+        download "https://dl.winehq.org/wine/wine-gecko/${GECKO_VERSION}/wine-gecko-${GECKO_VERSION}-x86.msi" "${WINE_CACHE}/wine-gecko-${GECKO_VERSION}-x86.msi"
+        err "$(cat <<EOF
+Unable to install wine-gecko, we did the best we could by loading the gecko msi installer into wine's cache so it can
+install it automatically, otherwise determine how to install wine-gecko on your distro!
 https://wiki.winehq.org/Gecko
 EOF
 )"
@@ -514,7 +543,7 @@ echo
 
 out "Create WINEPREFIX"
 # WINEDLLOVERRIDES=mscoree=d prevents mono install during prefix creation
-output=$(WINEPREFIX="${WINEPREFIX}" WINEARCH=win32 WINEDLLOVERRIDES=mscoree=d wineboot 2>&1) || {
+output=$(WINEPREFIX="${WINEPREFIX}" WINEARCH=win32 WINEDLLOVERRIDES=mscoree=d "$(dirname "${WINE_EXEC}")/wineboot" 2>&1) || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
@@ -576,7 +605,7 @@ out "Extract Earth & Beyond Client from Wise Installer"
 if [ ! -e "${CFG_LINUX_EXECUTABLE}" ] ; then
     # double quoting this breaks it; somehow it's being handled
     # shellcheck disable=SC2086
-    output=$(WINEPREFIX="${WINEPREFIX}" wine start /wait \
+    output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait \
         "${ENB_WINE_INSTALL_SOURCE}\\${ENB_CLIENT_INSTALL_EXE}" /S /X ${DEMO_WINE_INSTALL_SOURCE} 2>&1) || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
@@ -617,7 +646,7 @@ if [ ! -e "${CFG_LINUX_EXECUTABLE}" ] ; then
     echo "Installing"
     echo "Install Complete"
     echo "Mission Accomplished"
-    output=$(WINEPREFIX="${WINEPREFIX}" wine start /wait \
+    output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait \
         "${DEMO_WINE_INSTALL_SOURCE}\\e&bsetup.exe" /s /sms 2>&1) || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
@@ -771,7 +800,7 @@ echo
 
 if [ ! -e "${CSC_LINUX_PATH_EXE}" ] ; then
     out "Run Character and Starship Creator InstallShield (this will take a few minutes)"
-    output=$(WINEPREFIX="${WINEPREFIX}" wine start /wait \
+    output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait \
         "${CSC_WINE_INSTALL_SOURCE}\\${CSC_INSTALL_EXE}" /s /sms 2>&1) || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
@@ -809,13 +838,22 @@ add_exit_cmd "rm -f ${DER_CERT_REG}"
 #"RenderDeviceWidth"=dword:00000780
 #"RenderDeviceHeight"=dword:00000438
 #
-# 1400x1050 (Default)
-# If you have a 1920x1080 monitor playing at this 4:3 resolution windowed is likely your best option.
+# 1312x984 (Default)
+# If you have a 1920x1080 monitor playing at this 4:3 resolution windowed is likely going to give you the most accurate
+# representation with room for the title bar/taskbar.
+#"RenderDeviceWidth"=dword:00000520
+#"RenderDeviceHeight"=dword:000003D8
+#
+# 1400x1050
 #"RenderDeviceWidth"=dword:00000578
 #"RenderDeviceHeight"=dword:0000041A
 #
-# 1856x1392
+# 1792x1344
 # This works well with a *x1440 monitor.
+#"RenderDeviceWidth"=dword:00000700
+#"RenderDeviceHeight"=dword:00000540
+#
+# 1856x1392
 #"RenderDeviceWidth"=dword:00000740
 #"RenderDeviceHeight"=dword:00000570
 cat <<EOF > "${DER_CERT_REG}"
@@ -833,8 +871,8 @@ REGEDIT4
 "N7ConfigAutoDetectPerf"=dword:00000001
 "RenderDeviceDepth"=dword:00000020
 "RenderDeviceTextureDepth"=dword:00000020
-"RenderDeviceWidth"=dword:00000578
-"RenderDeviceHeight"=dword:0000041A
+"RenderDeviceWidth"=dword:00000520
+"RenderDeviceHeight"=dword:000003D8
 "RenderDeviceWindowed"=dword:00000001
 "SettingsTested"=dword:00000001
 "TextureFilter"=dword:00000002
@@ -852,7 +890,7 @@ ${DER_CERT_HEX}
 EOF
 
 # add the certificate .reg into the windows registry within the WINEPREFIX
-output=$(WINEPREFIX="${WINEPREFIX}" wine start /wait regedit.exe "${DER_CERT_REG}" 2>&1) || {
+output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait regedit.exe "${DER_CERT_REG}" 2>&1) || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
@@ -948,15 +986,14 @@ get_config_value()
 # multiboxing.
 #
 # Migrate all the settings over from the previous config file (so settings are no longer lost on updates)
-N7_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
-if [ -d "\${N7_CONFIG_PATH}" ] ; then
-    N7_LATEST_USER_CONFIG=\$(find "\${N7_CONFIG_PATH}" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
+if [ -d \"${N7_LINUX_CONFIG_PATH}\" ] ; then
+    N7_LATEST_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
     N7_LATEST_USER_CONFIG_SEEN="\$(dirname "\${N7_LATEST_USER_CONFIG}")/.\$(basename "\${N7_LATEST_USER_CONFIG}").seen"
     if [ -n "\${N7_LATEST_USER_CONFIG}" ] && [ ! -e "\${N7_LATEST_USER_CONFIG_SEEN}" ] ; then
         echo "Configuring new '\${N7_LATEST_USER_CONFIG}'"
 
         # we'll look at this later but we want to identify it before we start modifying N7_LATEST_USER_CONFIG
-        N7_PREV_USER_CONFIG=\$(find "\${N7_CONFIG_PATH}" -type f -name user.config -printf "%T+ %p\\n" | sort | cut -d' ' -f2 | tail -n2 | sed '1!d')
+        N7_PREV_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n" | sort | cut -d' ' -f2 | tail -n2 | sed '1!d')
 
         # ClientPath
         update_or_add_config_setting "\${N7_LATEST_USER_CONFIG}" ClientPath "${ENB_WINE_CLIENT_PATH_EXE}"
@@ -1004,7 +1041,7 @@ WAIT=\${WAIT:+/wait}
 launch()
 {
     # shellcheck disable=SC2086
-    output=\$(WINEPREFIX="${WINEPREFIX}" wine start /d "${N7_WINE_INSTALL_PATH}\\\\bin" \${WAIT:-} \\
+    output=\$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /d "${N7_WINE_INSTALL_PATH}\\\\bin" \${WAIT:-} \\
         "${N7_LAUNCHER_EXE}" 2>&1) || {
         rc="\${?}"; echo ">> ERROR: rc: \${rc}, output: \${output}" 1>&2; exit "\${rc}"
     }
@@ -1040,7 +1077,7 @@ WAIT=\${WAIT:+/wait}
 launch()
 {
     # shellcheck disable=SC2086
-    output=\$(WINEPREFIX="${WINEPREFIX}" wine start /d "${CFG_WINE_INSTALL_PATH}" \${WAIT:-} \\
+    output=\$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /d "${CFG_WINE_INSTALL_PATH}" \${WAIT:-} \\
         "${CFG_EXE}" 2>&1) || {
         rc="\${?}"; echo ">> ERROR: rc: \${rc}, output: \${output}" 1>&2; exit "\${rc}"
     }
@@ -1072,7 +1109,7 @@ WAIT=\${WAIT:+/wait}
 launch()
 {
     # shellcheck disable=SC2086
-    output=\$(WINEPREFIX="${WINEPREFIX}" wine start /d "${CSC_WINE_INSTALL_PATH}" \${WAIT:-} \\
+    output=\$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /d "${CSC_WINE_INSTALL_PATH}" \${WAIT:-} \\
         explorer /desktop=Earth_and_Beyond_Character_and_Starship_Creator,800x600 \\
         "${CSC_REDIRECT_EXE}" -noclassrestrictions 2>&1) || {
         rc="\${?}"; echo ">> ERROR: rc: \${rc}, output: \${output}" 1>&2; exit "\${rc}"
@@ -1112,11 +1149,52 @@ launch()
         mv --force "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/eb_ws_logo.bik" \\
             "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/eb_ws_logo.bik.bak" 2>/dev/null
     fi
+
+    # read options from launcher config
+    # /DML => Disable Mouse Lock
+    # /EXREORDER => Prototype Reorder
+    # /POPT => Packet Optimization
+    # defaults
+    DISABLE_MOUSE_LOCK="" # = False
+    USE_EXPERIMENTAL_PROTOTYPE_REORDER="/EXREORDER" # = True
+    USE_PACKET_OPTIMIZATION="/POPT" # = True
+    if [ -d \"${N7_LINUX_CONFIG_PATH}\" ] ; then
+        N7_LATEST_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
+        if [ -f "\${N7_LATEST_USER_CONFIG}" ] ; then
+            DISABLE_MOUSE_LOCK_SETTING="\$(grep -A1 DisableMouseLock "\${N7_LATEST_USER_CONFIG}" || true)"
+            if [ -n "\${DISABLE_MOUSE_LOCK_SETTING}" ] ; then
+                if echo "\${DISABLE_MOUSE_LOCK_SETTING}" | grep True >/dev/null 2>&1 ; then
+                    DISABLE_MOUSE_LOCK="/DML"
+                else
+                    DISABLE_MOUSE_LOCK=""
+                fi
+            fi
+
+            USE_EXPERIMENTAL_PROTOTYPE_REORDER_SETTING="\$(grep -A1 UseExperimentalReorder "\${N7_LATEST_USER_CONFIG}" || true)"
+            if [ -n "\${USE_EXPERIMENTAL_PROTOTYPE_REORDER_SETTING}" ] ; then
+                if echo "\${USE_EXPERIMENTAL_PROTOTYPE_REORDER_SETTING}" | grep True >/dev/null 2>&1 ; then
+                    USE_EXPERIMENTAL_PROTOTYPE_REORDER="/EXREORDER"
+                else
+                    USE_EXPERIMENTAL_PROTOTYPE_REORDER=""
+                fi
+            fi
+
+            USE_PACKET_OPTIMIZATION_SETTING="\$(grep -A1 UsePacketOpt "\${N7_LATEST_USER_CONFIG}" || true)"
+            if [ -n "\${USE_PACKET_OPTIMIZATION_SETTING}" ] ; then
+                if echo "\${USE_PACKET_OPTIMIZATION_SETTING}" | grep True >/dev/null 2>&1 ; then
+                    USE_PACKET_OPTIMIZATION="/POPT"
+                else
+                    USE_PACKET_OPTIMIZATION=""
+                fi
+            fi
+        fi
+    fi
+
     SERVER_IP_ADDRESS="\$( ( ping -c1 -w1 ${N7_SERVER_HOSTNAME} || true ) | sed '1!d' | sed -E 's/.*\\(([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\).*/\\1/')"
     # shellcheck disable=SC2086
-    output=\$(WINEPREFIX="${WINEPREFIX}" wine start /d "${N7_WINE_INSTALL_PATH}\\\\bin" \${WAIT:-} \\
+    output=\$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /d "${N7_WINE_INSTALL_PATH}\\\\bin" \${WAIT:-} \\
         "${N7_PROXY_EXE}" /LADDRESS:0 /ADDRESS:"\${SERVER_IP_ADDRESS}" /CLIENT:"${ENB_WINE_CLIENT_PATH_EXE}" \\
-        /POPT /EXREORDER /DML 2>&1) || {
+        \${DISABLE_MOUSE_LOCK} \${USE_EXPERIMENTAL_PROTOTYPE_REORDER} \${USE_PACKET_OPTIMIZATION} 2>&1) || {
         rc="\${?}"; echo ">> ERROR: rc: \${rc}, output: \${output}" 1>&2; exit "\${rc}"
     }
 }
@@ -1267,26 +1345,29 @@ if [ -n "${XDG_DATA_DIRS:-}" ] ; then
     rm --force "${ENB_APP_DIR}/Uninstall Earth & Beyond.desktop"
     rm --force "${MENU_DIR}/wine-Programs-EA GAMES-Earth & Beyond-Uninstall Earth & Beyond.menu"
 
-    if command -v gsettings >/dev/null 2>&1 ; then
+    if ( command -v gsettings && env | grep -i gnome && pgrep -i gnome ) >/dev/null 2>&1 ; then
         GNOME_APP_FOLDER=enb
         dot_ogdaf='org.gnome.desktop.app-folders'
         slash_ogdaf='org/gnome/desktop/app-folders/folders'
-        if ! pf gsettings get "${dot_ogdaf}" folder-children | grep "${GNOME_APP_FOLDER}" ; then
-            EXISTING_GNOME_APP_FOLDERS="$(pf gsettings get "${dot_ogdaf}" folder-children | pf sed 's/[\[]//g' | sed 's/[]]//g')"
-            gsettings set "${dot_ogdaf}" folder-children \
-                "[${EXISTING_GNOME_APP_FOLDERS}, '${GNOME_APP_FOLDER}']"
-            gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' name 'Earth & Beyond'
-            gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' categories "['${GNOME_APP_FOLDER}']"
-        fi
-        if [ -d "${ENB_APP_DIR}" ] ; then
-            # shellcheck disable=SC2016
-            find "${ENB_APP_DIR}" -type f -name '*.desktop' \
-                -exec sed -i -e '/^\(Categories=\).*/{s//\1'"${GNOME_APP_FOLDER}"'/;:a;n;ba;q}' -e '$aCategories='"${GNOME_APP_FOLDER}" {} \;
-        fi
-        if [ -d "${N7_APP_DIR}" ] ; then
-            # shellcheck disable=SC2016
-            find "${N7_APP_DIR}" -type f -name '*.desktop' \
-                -exec sed -i -e '/^\(Categories=\).*/{s//\1'"${GNOME_APP_FOLDER}"'/;:a;n;ba;q}' -e '$aCategories='"${GNOME_APP_FOLDER}" {} \;
+        # if this fails despite our best efforts above this is probably not really gnome
+        if gsettings get "${dot_ogdaf}" folder-children >/dev/null 2>&1 ; then
+            if ! pf gsettings get "${dot_ogdaf}" folder-children | grep "${GNOME_APP_FOLDER}" ; then
+                EXISTING_GNOME_APP_FOLDERS="$(pf gsettings get "${dot_ogdaf}" folder-children | pf sed 's/[\[]//g' | sed 's/[]]//g')"
+                gsettings set "${dot_ogdaf}" folder-children \
+                    "[${EXISTING_GNOME_APP_FOLDERS}, '${GNOME_APP_FOLDER}']"
+                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' name 'Earth & Beyond'
+                gsettings set "${dot_ogdaf}"'.folder:/'"${slash_ogdaf}/${GNOME_APP_FOLDER}"'/' categories "['${GNOME_APP_FOLDER}']"
+            fi
+            if [ -d "${ENB_APP_DIR}" ] ; then
+                # shellcheck disable=SC2016
+                find "${ENB_APP_DIR}" -type f -name '*.desktop' \
+                    -exec sed -i -e '/^\(Categories=\).*/{s//\1'"${GNOME_APP_FOLDER}"'/;:a;n;ba;q}' -e '$aCategories='"${GNOME_APP_FOLDER}" {} \;
+            fi
+            if [ -d "${N7_APP_DIR}" ] ; then
+                # shellcheck disable=SC2016
+                find "${N7_APP_DIR}" -type f -name '*.desktop' \
+                    -exec sed -i -e '/^\(Categories=\).*/{s//\1'"${GNOME_APP_FOLDER}"'/;:a;n;ba;q}' -e '$aCategories='"${GNOME_APP_FOLDER}" {} \;
+            fi
         fi
     fi
 
