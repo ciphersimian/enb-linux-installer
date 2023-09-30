@@ -23,9 +23,11 @@ I've made some small changes based on my experience (which probably mainly accou
 My goal was to reduce user interaction to as close to zero as possible (e.g. using silent install methods for each component, pre-configuring things per Nimsy's guide).  There are only a few prompts near the end, otherwise it's 100% automated and takes ~6-10 minutes (depending on your internet connection).
 
 It will check for and install the following packages if missing:
+* `curl`
+* `sha256sum`
 * `mesa-utils`
+* `wine-gecko`
 * `wine-staging`
-* `winetricks`
 
 Everything will be installed into a new WINE prefix `~/.wine-enb`; you will be prompted to remove this if it already exists.  If you don't remove it, the script will attempt to modify the existing installation accordingly but this is not recommended.
 
@@ -60,7 +62,7 @@ This script will undoubtedly need tweaks on other distros and probably even on o
 
 This represents a fundamental change to the state of your system which is why I didn't include it in the script.
 
-By far the most complicated and unpredictable part is installing wine and its dependencies (which is done first) so if you already have that installed and working then it's far more likely the rest of the script will work for you on any distro.  It assumes that you have configured things such that there is a wine-staging and winetricks package available through whatever package manager your distro uses.  For gaming that is almost always what you want.  The packages provided by the individual distributions are superior to those provided by WineHQ so that's why I use wine-staging rather than winehq-staging.
+By far the most complicated and unpredictable part is installing wine and its dependencies (which is done first) so if you already have that installed and working then it's far more likely the rest of the script will work for you on any distro.  It assumes that you have configured things such that there is a wine-staging package available through whatever package manager your distro uses.  For gaming that is almost always what you want.  The packages provided by the individual distributions are superior to those provided by WineHQ so that's why I use wine-staging rather than winehq-staging.
 
 This script strives to be idempotent; running it multiple times will additively bring the system to the desired state and skip all the time-consuming things which already appear to be installed or completed from prior executions (or manual intervention) like downloading and installing various components.  If something didn't work and you have corrected other things since it may be useful to remove/uninstall prior portions so the script will run them again.
 

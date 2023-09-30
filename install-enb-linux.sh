@@ -26,9 +26,11 @@
 # automated and takes ~6-10 minutes (depending on your internet connection).
 #
 # It will check for and install the following packages if missing:
+# * curl
+# * sha256sum
 # * mesa-utils
+# * wine-gecko
 # * wine-staging
-# * winetricks
 #
 # Everything will be installed into a new WINE prefix ~/.wine-enb; you will be prompted to remove this if it already
 # exists.  If you don't remove it, the script will attempt to modify the existing installation accordingly but this is
@@ -46,7 +48,7 @@
 #
 # The goal was to fundamentally support all popular Linux distros (ID_LIKE arch, debian, gentoo, rhel, or suse) so the
 # package management is abstracted, though it was only tested (and therefore, only works) on Manjaro (rolling release
-# based on arch) on 2023-09-21 with:
+# based on arch) on 2023-09-30 with:
 #
 # $ wine --version
 # wine-8.15 (Staging)
@@ -74,10 +76,10 @@
 #
 # By far the most complicated and unpredictable part is installing wine and its dependencies (which is done first) so if
 # you already have that installed and working then it's far more likely the rest of the script will work for you on any
-# distro.  It assumes that you have configured things such that there is a wine-staging and winetricks package available
-# through whatever package manager your distro uses.  For gaming that is almost always what you want.  The packages
-# provided by the individual distributions are superior to those provided by WineHQ so that's why I use wine-staging
-# rather than winehq-staging.
+# distro.  It assumes that you have configured things such that there is a wine-staging package available through
+# whatever package manager your distro uses.  For gaming that is almost always what you want.  The packages provided by
+# the individual distributions are superior to those provided by WineHQ so that's why I use wine-staging rather than
+# winehq-staging.
 #
 # This script strives to be idempotent; running it multiple times will additively bring the system to the desired state
 # and skip all the time-consuming things which already appear to be installed or completed from prior executions (or
@@ -222,7 +224,15 @@ add_exit_cmd()
 {
     new_cmd="${*}"
     vrb "add_exit_cmd: new_cmd: '${new_cmd}'"
-    eval "set -- $(pf trap | pf grep -E 'EXIT$' | sed 's/ EXIT$//')"
+    # Some shells, e.g. dash, do not respect trap behavior when run in a subshell with no params and clear the traps
+    # anyway; in order to get around that use a temporary file instead.
+    #
+    # Oh the irony, since the whole reason this function exists is to ensure that we clean up temp files like this no
+    # matter what, but we won't be able to do that here... so hopefully the script never dies in this section!
+    ADD_EXIT_CMD_TEMP="$(mktemp /tmp/add_exit_cmd_XXXXXXXXXX)"
+    trap > "${ADD_EXIT_CMD_TEMP}"
+    eval "set -- $(pf cat "${ADD_EXIT_CMD_TEMP}" | pf grep -E 'EXIT$' | sed 's/ EXIT$//')"
+    rm -f "${ADD_EXIT_CMD_TEMP}"
     shift # trap
     shift # --
     vrb "add_exit_cmd: \${*}: '${*}'"
@@ -353,7 +363,7 @@ if [ "$(id -u)" -eq 0 ] ; then
     error_exit "$(cat <<EOF
 This script should not be run as root.
 Most of what it does needs to happen as the normal user who will run the game and related tools.
-You will only be prompted for sudo access in the event that additional OS packages are required and to update winetricks.
+You will only be prompted for sudo access in the event that additional OS packages are required.
 EOF
 )"
 fi
@@ -488,44 +498,22 @@ if ! is_extra_pkg_installed wine-gecko ; then
                 error_exit "Could not install wine-gecko nor a usable wine cache (${WINE_CACHE})!"
             fi
         fi
-        download "https://dl.winehq.org/wine/wine-gecko/${GECKO_VERSION}/wine-gecko-${GECKO_VERSION}-x86.msi" "${WINE_CACHE}/wine-gecko-${GECKO_VERSION}-x86.msi"
-        err "$(cat <<EOF
+        GECKO_DL="${WINE_CACHE}/wine-gecko-${GECKO_VERSION}-x86.msi"
+        if [ ! -e "${GECKO_DL}" ] ; then
+            download "https://dl.winehq.org/wine/wine-gecko/${GECKO_VERSION}/$(basename "${GECKO_DL}")" "${GECKO_DL}"
+            err "$(cat <<EOF
 Unable to install wine-gecko, we did the best we could by loading the gecko msi installer into wine's cache so it can
 install it automatically, otherwise determine how to install wine-gecko on your distro!
 https://wiki.winehq.org/Gecko
 EOF
 )"
+        fi
     fi
 fi
 echo
 
 out "Check wine version"
-wine --version
-echo
-
-out "Check for winetricks"
-if ! command -v winetricks ; then
-    out "winetricks is not installed, attempting to install winetricks..."
-    install_pkg winetricks
-
-    if ! command -v winetricks ; then
-        error_exit "$(cat <<EOF
-Unable to install winetricks, determine how to install winetricks on your distro!
-http://wiki.winehq.org/winetricks
-EOF
-)"
-    fi
-fi
-echo
-
-out "Make sure winetricks has recently been updated"
-if [ "$(stat -c %Y -- "$(command -v winetricks)")" -lt "$(( $(date '+%s') - 172800 ))" ] ; then
-    sudo winetricks --self-update
-fi
-echo
-
-out "Check winetricks version"
-winetricks --version
+"${WINE_EXEC}" --version
 echo
 
 banner 'WINEPREFIX CREATION AND CONFIGURATION'
@@ -548,6 +536,36 @@ output=$(WINEPREFIX="${WINEPREFIX}" WINEARCH=win32 WINEDLLOVERRIDES=mscoree=d "$
 }
 echo
 
+out "Check for winetricks"
+# we just download winetricks from github and put it in the prefix to avoid needing sudo and stupid dependency issues
+# with Ubuntu
+WINETRICKS_EXEC="${WINEPREFIX}/winetricks"
+if [ ! -e "${WINETRICKS_EXEC}" ] ; then
+    out "winetricks is not present, downloading winetricks..."
+    WINETRICKS_URL='https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks'
+    download "${WINETRICKS_URL}" "${WINETRICKS_EXEC}"
+    if [ ! -e "${WINETRICKS_EXEC}" ] ; then
+        error_exit "$(cat <<EOF
+Unable to download winetricks from '${WINETRICKS_URL}' to '${WINETRICKS_EXEC}'!
+EOF
+)"
+    fi
+fi
+
+# make sure winetricks is executable
+if [ ! -x "${WINETRICKS_EXEC}" ] ; then
+    chmod a+x "${WINETRICKS_EXEC}"
+fi
+
+# make sure winetricks has recently been updated
+if [ "$(stat -c %Y -- "${WINETRICKS_EXEC}")" -lt "$(( $(date '+%s') - 172800 ))" ] ; then
+    "${WINETRICKS_EXEC}" --self-update
+fi
+
+"${WINETRICKS_EXEC}" --version
+
+echo
+
 out "Install dependencies in WINEPREFIX (this will take several minutes)"
 # https://forum.enb-emulator.com/index.php?/topic/66-linuxmaybe-macwine-install-guide/&do=findComment&comment=91615
 # Nimsy reported:
@@ -564,7 +582,7 @@ out "Install dependencies in WINEPREFIX (this will take several minutes)"
 #
 # vcrun2008 required by ${N7_LAUNCHER_EXE}
 if [ ! -e "${WINEPREFIX}/winetricks.log" ] || ! grep vcrun2008 "${WINEPREFIX}/winetricks.log" ; then
-    output=$(WINEPREFIX="${WINEPREFIX}" winetricks -q winxp windowmanagerdecorated=y windowmanagermanaged=y \
+    output=$(WINEPREFIX="${WINEPREFIX}" ${WINETRICKS_EXEC} -q winxp windowmanagerdecorated=y windowmanagermanaged=y \
         dotnet20 corefonts vcrun2008 2>&1) || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
@@ -664,7 +682,7 @@ echo
 
 out "Verify download of Net-7 Unified Installer (could take a moment)"
 echo "NOTE: the checksum may change due to Net-7 updates so we don't validate the checksum here."
-printf "For reference sha256sum was (2023-09-21):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
+printf "For reference sha256sum was (2023-09-30):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
 ls -l "${N7_DL}"
 checksum "${N7_DL}"
 chmod a+x "${N7_DL}"
@@ -739,7 +757,7 @@ load_${N7_WINETRICKS_VERB_NAME}()
     "
 }
 EOF
-    output="$(WINEPREFIX=${WINEPREFIX} winetricks "${N7_WINETRICKS_VERB}" 2>&1)" || {
+    output="$(WINEPREFIX=${WINEPREFIX} ${WINETRICKS_EXEC} "${N7_WINETRICKS_VERB}" 2>&1)" || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
 
@@ -818,7 +836,7 @@ echo
 
 out "Verify retrieval of ${N7_SERVER_HOSTNAME} SSL certificate"
 echo "NOTE: the checksum will change every 3 months as the SSL cert is updated so we don't validate the checksum here."
-printf "For reference sha256sum was (2023-09-21):\n4516f8c965e9ebdfd02425ae359f7af61fc67e92d4bec71d01c57719bcc16313\n"
+printf "For reference sha256sum was (2023-09-30):\n4516f8c965e9ebdfd02425ae359f7af61fc67e92d4bec71d01c57719bcc16313\n"
 ls -l "${N7_CERT_DL}"
 checksum "${N7_CERT_DL}"
 echo
@@ -1432,7 +1450,7 @@ load_${N7_LAUNCHER_WINETRICKS_VERB_NAME}()
                 If ErrorLevel
                 {
                     updates_complete += 1
-                    If updates_complete = 5
+                    If updates_complete >= 5
                         Break
                     WinActivate, Update available ahk_exe ${N7_LAUNCHER_EXE}, Version cannot be determined.
                 }
@@ -1473,7 +1491,7 @@ load_${N7_LAUNCHER_WINETRICKS_VERB_NAME}()
     "
 }
 EOF
-output="$(WINEPREFIX=${WINEPREFIX} winetricks "${N7_LAUNCHER_WINETRICKS_VERB}" 2>&1)" || {
+output="$(WINEPREFIX=${WINEPREFIX} ${WINETRICKS_EXEC} "${N7_LAUNCHER_WINETRICKS_VERB}" 2>&1)" || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
