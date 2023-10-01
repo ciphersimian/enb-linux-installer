@@ -26,6 +26,7 @@
 # automated and takes ~6-10 minutes (depending on your internet connection).
 #
 # It will check for and install the following packages if missing:
+# * cabextract
 # * curl
 # * sha256sum
 # * mesa-utils
@@ -380,7 +381,7 @@ case "${ID_LIKE}" in
         PACKAGE_EXTRA_INSTALL_COMMAND="sudo pamac install --no-confirm " ;;
     *debian*)
         PACKAGE_QUERY_COMMAND="apt list --installed " &&
-        PACKAGE_INSTALL_COMMAND="sudo apt --assume-yes install --install-recommends " ;;
+        PACKAGE_INSTALL_COMMAND="sudo DEBIAN_FRONTEND=noninteractive apt --assume-yes install --install-recommends " ;;
     *gentoo*)
         PACKAGE_QUERY_COMMAND="qlist --nocolor --installed " &&
         PACKAGE_INSTALL_COMMAND="sudo emerge --ask n " ;;
@@ -398,7 +399,7 @@ is_pkg_installed()
 {
     pkg="${1}"
     installed_pkgs="$(eval "${PACKAGE_QUERY_COMMAND}")"
-    pf echo "${installed_pkgs}" | grep "${pkg}"
+    pf echo "${installed_pkgs}" | grep "${pkg}" 1>&2
 }
 
 is_extra_pkg_installed()
@@ -411,13 +412,13 @@ is_extra_pkg_installed()
     fi
 
     installed_extra_pkgs="$(eval "${extra_query_command}")"
-    pf echo "${installed_extra_pkgs}" | grep "${extra_pkg}"
+    pf echo "${installed_extra_pkgs}" | grep "${extra_pkg}" 1>&2
 }
 
 install_pkg()
 {
     pkg="${1}"
-    eval "${PACKAGE_INSTALL_COMMAND} ${pkg}"
+    eval "${PACKAGE_INSTALL_COMMAND} ${pkg}" 1>&2
 }
 
 install_extra_pkg()
@@ -429,7 +430,7 @@ install_extra_pkg()
         extra_install_command="${PACKAGE_EXTRA_INSTALL_COMMAND}"
     fi
 
-    eval "${extra_install_command} ${extra_pkg}"
+    eval "${extra_install_command} ${extra_pkg}" 1>&2
 }
 
 find_wine()
@@ -456,6 +457,21 @@ winehq-* packages are not recommended, but may be the best option on your distro
 EOF
             )"
         fi
+    fi
+}
+
+patch_winetricks()
+{
+    # patch Winetricks#2121
+    # https://github.com/Winetricks/winetricks/issues/2121
+    # shellcheck disable=SC2016
+    if grep 'if \[ "${W_OPT_NOCLEAN}" = 1 ]; then' "${WINETRICKS_EXEC}" ; then
+        EDIT_WITH_SUDO=''
+        if [ ! -w "${WINETRICKS_EXEC}" ] ; then
+            EDIT_WITH_SUDO='sudo '
+        fi
+        # shellcheck disable=SC2016
+        ${EDIT_WITH_SUDO} sed -i -e 's/if \[ "${W_OPT_NOCLEAN}" = 1 ]; then/if [ -z "${W_OPT_NOCLEAN}" ]; then/' "${WINETRICKS_EXEC}"
     fi
 }
 
@@ -536,6 +552,18 @@ output=$(WINEPREFIX="${WINEPREFIX}" WINEARCH=win32 WINEDLLOVERRIDES=mscoree=d "$
 }
 echo
 
+# we're not exhaustively checking all the winetricks dependencies here since we use a very limited amount of winetricks
+# functionality; we'll just add them opportunistically as people run into issues
+out "Check for winetricks dependencies"
+if ! command -v cabextract >/dev/null 2>&1 ; then
+    install_pkg cabextract
+
+    if ! command -v cabextract >/dev/null 2>&1 ; then
+        err "Unable to install cabextract, determine how to install it on your distro!"
+    fi
+fi
+echo
+
 out "Check for winetricks"
 # we just download winetricks from github and put it in the prefix to avoid needing sudo and stupid dependency issues
 # with Ubuntu
@@ -544,6 +572,7 @@ if [ ! -e "${WINETRICKS_EXEC}" ] ; then
     out "winetricks is not present, downloading winetricks..."
     WINETRICKS_URL='https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks'
     download "${WINETRICKS_URL}" "${WINETRICKS_EXEC}"
+    patch_winetricks
     if [ ! -e "${WINETRICKS_EXEC}" ] ; then
         error_exit "$(cat <<EOF
 Unable to download winetricks from '${WINETRICKS_URL}' to '${WINETRICKS_EXEC}'!
@@ -559,10 +588,11 @@ fi
 
 # make sure winetricks has recently been updated
 if [ "$(stat -c %Y -- "${WINETRICKS_EXEC}")" -lt "$(( $(date '+%s') - 172800 ))" ] ; then
-    "${WINETRICKS_EXEC}" --self-update
+    WINE="${WINE_EXEC}" "${WINETRICKS_EXEC}" --self-update
+    patch_winetricks
 fi
 
-"${WINETRICKS_EXEC}" --version
+WINE="${WINE_EXEC}" "${WINETRICKS_EXEC}" --version
 
 echo
 
@@ -582,7 +612,7 @@ out "Install dependencies in WINEPREFIX (this will take several minutes)"
 #
 # vcrun2008 required by ${N7_LAUNCHER_EXE}
 if [ ! -e "${WINEPREFIX}/winetricks.log" ] || ! grep vcrun2008 "${WINEPREFIX}/winetricks.log" ; then
-    output=$(WINEPREFIX="${WINEPREFIX}" ${WINETRICKS_EXEC} -q winxp windowmanagerdecorated=y windowmanagermanaged=y \
+    output=$(WINEPREFIX="${WINEPREFIX}" WINE="${WINE_EXEC}" ${WINETRICKS_EXEC} -q winxp windowmanagerdecorated=y windowmanagermanaged=y \
         dotnet20 corefonts vcrun2008 2>&1) || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
@@ -757,7 +787,7 @@ load_${N7_WINETRICKS_VERB_NAME}()
     "
 }
 EOF
-    output="$(WINEPREFIX=${WINEPREFIX} ${WINETRICKS_EXEC} "${N7_WINETRICKS_VERB}" 2>&1)" || {
+    output="$(WINEPREFIX=${WINEPREFIX} WINE="${WINE_EXEC}" ${WINETRICKS_EXEC} "${N7_WINETRICKS_VERB}" 2>&1)" || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
 
@@ -856,11 +886,11 @@ add_exit_cmd "rm -f ${DER_CERT_REG}"
 #"RenderDeviceWidth"=dword:00000780
 #"RenderDeviceHeight"=dword:00000438
 #
-# 1312x984 (Default)
+# 1280x960 (Default)
 # If you have a 1920x1080 monitor playing at this 4:3 resolution windowed is likely going to give you the most accurate
 # representation with room for the title bar/taskbar.
-#"RenderDeviceWidth"=dword:00000520
-#"RenderDeviceHeight"=dword:000003D8
+#"RenderDeviceWidth"=dword:00000500
+#"RenderDeviceHeight"=dword:000003C0
 #
 # 1400x1050
 #"RenderDeviceWidth"=dword:00000578
@@ -875,7 +905,7 @@ add_exit_cmd "rm -f ${DER_CERT_REG}"
 #"RenderDeviceWidth"=dword:00000740
 #"RenderDeviceHeight"=dword:00000570
 cat <<EOF > "${DER_CERT_REG}"
-REGEDIT4
+Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\\Software\\Westwood Studios]
 
@@ -886,14 +916,20 @@ REGEDIT4
 "Registered"=dword:00000001
 
 [HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Render]
+"EBConfigVersion"=dword:0000000b
+"LandLOD"=dword:00000007
+"LandPolyBudget"=dword:00006d60
 "N7ConfigAutoDetectPerf"=dword:00000001
+"PolyBudget"=dword:00007530
 "RenderDeviceDepth"=dword:00000020
 "RenderDeviceTextureDepth"=dword:00000020
-"RenderDeviceWidth"=dword:00000520
-"RenderDeviceHeight"=dword:000003D8
+"RenderDeviceWidth"=dword:00000500
+"RenderDeviceHeight"=dword:000003C0
 "RenderDeviceWindowed"=dword:00000001
 "SettingsTested"=dword:00000001
+"StarBudget"=dword:000007d0
 "TextureFilter"=dword:00000002
+"TextureReduction"=dword:00000000
 
 [HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Sound]
 "cinematic enabled"=dword:00000001
@@ -1491,7 +1527,7 @@ load_${N7_LAUNCHER_WINETRICKS_VERB_NAME}()
     "
 }
 EOF
-output="$(WINEPREFIX=${WINEPREFIX} ${WINETRICKS_EXEC} "${N7_LAUNCHER_WINETRICKS_VERB}" 2>&1)" || {
+output="$(WINEPREFIX=${WINEPREFIX} WINE="${WINE_EXEC}" ${WINETRICKS_EXEC} "${N7_LAUNCHER_WINETRICKS_VERB}" 2>&1)" || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
