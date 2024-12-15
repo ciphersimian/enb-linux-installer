@@ -31,7 +31,7 @@
 # * sha256sum
 # * mesa-utils
 # * wine-gecko
-# * wine-staging
+# * wine
 #
 # Everything will be installed into a new WINE prefix ~/.wine-enb; you will be prompted to remove this if it already
 # exists.  If you don't remove it, the script will attempt to modify the existing installation accordingly but this is
@@ -49,10 +49,10 @@
 #
 # The goal was to fundamentally support all popular Linux distros (ID_LIKE arch, debian, gentoo, rhel, or suse) so the
 # package management is abstracted, though it was only tested (and therefore, only works) on Manjaro (rolling release
-# based on arch) on 2023-09-30 with:
+# based on arch) on 2024-12-15 with:
 #
 # $ wine --version
-# wine-8.15 (Staging)
+# wine-9.20
 #
 # Limitations & Troubleshooting
 # =============================
@@ -77,10 +77,8 @@
 #
 # By far the most complicated and unpredictable part is installing wine and its dependencies (which is done first) so if
 # you already have that installed and working then it's far more likely the rest of the script will work for you on any
-# distro.  It assumes that you have configured things such that there is a wine-staging package available through
-# whatever package manager your distro uses.  For gaming that is almost always what you want.  The packages provided by
-# the individual distributions are superior to those provided by WineHQ so that's why I use wine-staging rather than
-# winehq-staging.
+# distro.  It assumes that you have configured things such that there is a wine package available through
+# whatever package manager your distro uses.
 #
 # This script strives to be idempotent; running it multiple times will additively bring the system to the desired state
 # and skip all the time-consuming things which already appear to be installed or completed from prior executions (or
@@ -111,92 +109,6 @@ esac
 CMD="${0}"
 CMD_BASE="$(basename "${CMD}")"
 CMD_HOSTNAME="$(hostname -s)"
-
-# https://forum.enb-emulator.com/index.php?/topic/66-linuxmaybe-macwine-install-guide/&do=findComment&comment=91573
-# "If you foolishly installed EnB into program files directory"
-#                                      - karu
-#
-# LOL - I took this advice initially while following Nimsy's excellent instructions and all I have to say is that if you
-# change these paths you will suffer FAR more than if you leave them alone and deal with the Windows-centric spaces via
-# proper quoting or escaping with backslashes.
-#
-# ${N7_INSTALL_EXE} is hard-coded to look for this path
-# - It won't find your EnB install and won't offer to update it if EnB is not in the default location (though I
-#   ultimately opted to use the more reliable and comprehensive ${N7_LAUNCHER_EXE} update process)
-# ${N7_LAUNCHER_EXE} is hard-coded to look for the default paths for ClientPath, EnBConfigPath, and CharCreatorPath
-# - If you change it you will have to re-browse to the ${ENB_CLIENT_EXE} every time there's an update (several times in
-#   a row the first time you install) because it will miraculously forget the location (and all of your other settings)
-#   every time there's an update (sigh - I implemented a workaround to restore your previous settings each time the
-#   launcher is started)
-# - As far as I can tell there is NO WAY to:
-#   - pre-create a config file for it
-#   - pass configuration options on the command-line
-#   - Change ClientPath to a different value even temporarily if the default location exists; ${N7_LAUNCHER_EXE} will
-#     just silently replace whatever you set ClientPath to with the default
-#   - Change EnBConfigPath or CharCreatorPath; they don't get replaced, but they also don't do anything
-#     - If the Character and Starship Creator is not in its default location the Tools menu entry for it will be broken.
-#       No amount of changing the user.config can change that.
-#       - Even when the Tools menu works for it though, it won't work on Linux because it isn't run with the correct
-#         working directory (which is why I was trying to point CharCreatorPath at a script)
-#       - Luckily I was able to work around this by replacing the executable itself with a script of the same name (see
-#         ${CSC_REDIRECT_EXE})
-#     - The workaround I used for the Character and Starship Creator doesn't work for the config executables because
-#       ${N7_LAUNCHER_EXE} will clobber them on every update so we're stuck with the default config exe from the Tools
-#       menu.
-#     - I added an enb-cfg script as a shortcut to start the improved ${CFG_EXE} application.
-WINEPREFIX="${WINEPREFIX:-${HOME}/.wine-enb}"
-BIN_DIR="${HOME}/.local/bin"
-APP_DIR="${HOME}/.local/share/applications/wine/Programs"
-MENU_DIR="${HOME}/.config/menus/applications-merged"
-
-ENB_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/EA GAMES/Earth & Beyond"
-ENB_WINE_INSTALL_PATH='C:\\Program Files\\EA GAMES\\Earth & Beyond'
-ENB_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_PATH} Install"
-ENB_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_PATH}' Install'
-ENB_LINK="${BIN_DIR}/enb"
-ENB_CLIENT_EXE='client.exe'
-# shellcheck disable=SC1003
-ENB_WINE_CLIENT_PATH_EXE=${ENB_WINE_INSTALL_PATH}'\\release\\'${ENB_CLIENT_EXE}
-ENB_CLIENT_INSTALL_EXE='eandb_demo.exe'
-ENB_CLIENT_DL="${ENB_LINUX_INSTALL_SOURCE}/${ENB_CLIENT_INSTALL_EXE}"
-ENB_APP_DIR="${APP_DIR}/EA GAMES/Earth & Beyond"
-
-DEMO_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/demo"
-DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
-
-N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/Net-7"
-N7_WINE_INSTALL_PATH='C:\\Program Files\\Net-7'
-N7_LINUX_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
-N7_LAUNCHER_EXE='LaunchNet7.exe'
-N7_LAUNCHER_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_LAUNCHER_EXE}_wine_launcher.sh"
-N7_PROXY_EXE='net7proxy.exe'
-N7_PROXY_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_PROXY_EXE}_wine_launcher.sh"
-N7_LAUNCHER_LINK="${BIN_DIR}/enb-launcher"
-N7_INSTALL_EXE='Net-7_Install.exe'
-N7_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_INSTALL_EXE}"
-N7_SERVER_HOSTNAME="sunrise.net-7.org"
-N7_CERT_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_SERVER_HOSTNAME}.crt"
-N7_APP_DIR="${APP_DIR}/Net-7 Entertainment/EnB Emulator"
-
-CFG_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/EBCONFIG"
-CFG_WINE_INSTALL_PATH=${ENB_WINE_INSTALL_PATH}'\\EBCONFIG'
-CFG_LINK="${BIN_DIR}/enb-cfg"
-CFG_EXE='net7config.exe'
-CFG_SCRIPT="${CFG_LINUX_INSTALL_PATH}/${CFG_EXE}_wine_launcher.sh"
-CFG_LINUX_EXECUTABLE="${CFG_LINUX_INSTALL_PATH}/E&BConfig.exe"
-
-CSC_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/csc"
-CSC_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\csc'
-CSC_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/Character and Starship Creator"
-CSC_LINUX_AVATAR_PATH="${WINEPREFIX}/drive_c/ProgramData/Westwood Studios/Earth and Beyond/Character and Starship Creator"
-CSC_WINE_INSTALL_PATH=${ENB_WINE_INSTALL_PATH}'\\Character and Starship Creator'
-CSC_LINK="${BIN_DIR}/enb-csc"
-CSC_LINUX_EXE='Character and Starship Creator.exe'
-CSC_LINUX_PATH_EXE="${CSC_LINUX_INSTALL_PATH}/${CSC_LINUX_EXE}"
-CSC_REDIRECT_EXE='CnSC.exe'
-CSC_SCRIPT="${ENB_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}_wine_launcher.sh"
-CSC_INSTALL_EXE='CharacterStarshipCreator.exe'
-CSC_DL="${CSC_LINUX_INSTALL_SOURCE}/${CSC_INSTALL_EXE}"
 
 # Basic helpers
 out() { printf "%s %s: %s\n" "$(date '+%F %T')" "${CMD_HOSTNAME}" "${*}" ; }
@@ -339,6 +251,8 @@ show_help()
     echo "$EMSG"
 }
 
+WINEPREFIX="${WINEPREFIX:-${HOME}/.wine-enb}"
+
 # Parse command line options (odd formatting to simplify show_help() above)
 while [ "${#}" -ne 0 ] ; do
     case "${1}" in
@@ -349,6 +263,8 @@ while [ "${#}" -ne 0 ] ; do
             DEBUG="$(( DEBUG + 1 ))" && VERBOSE="${DEBUG}" && echo "#-INFO: DEBUG=${DEBUG} (implies VERBOSE=${VERBOSE})" && shift ;;
         -v|--verbose)   # Enable verbose messages
             VERBOSE="$(( VERBOSE + 1 ))" && echo "#-INFO: VERBOSE=${VERBOSE}" && shift ;;
+        -p|--prefix)    # Set the absolute path to the WINEPREFIX (DEFAULT: WINEPREFIX=${WINEPREFIX})
+            WINEPREFIX="${2}" && vrb "#-INFO: WINEPREFIX=${WINEPREFIX}" && shift 2;;
         --)              # end argument parsing
             shift && break ;;
         -*)
@@ -375,10 +291,9 @@ fi
 
 case "${ID_LIKE}" in
     *arch*)
+        ID_LIKE_ARCH=1 &&
         PACKAGE_QUERY_COMMAND="pacman --query " &&
-        PACKAGE_EXTRA_QUERY_COMMAND="pamac list --installed " &&
-        PACKAGE_INSTALL_COMMAND="sudo pacman --sync --noconfirm " &&
-        PACKAGE_EXTRA_INSTALL_COMMAND="sudo pamac install --no-confirm " ;;
+        PACKAGE_INSTALL_COMMAND="sudo pacman --sync --noconfirm " ;;
     *debian*)
         PACKAGE_QUERY_COMMAND="apt list --installed " &&
         PACKAGE_INSTALL_COMMAND="sudo DEBIAN_FRONTEND=noninteractive apt --assume-yes install --install-recommends " ;;
@@ -402,42 +317,15 @@ is_pkg_installed()
     pf echo "${installed_pkgs}" | grep "${pkg}" 1>&2
 }
 
-is_extra_pkg_installed()
-{
-    extra_pkg="${1}"
-
-    extra_query_command="${PACKAGE_QUERY_COMMAND}"
-    if [ -n "${PACKAGE_EXTRA_QUERY_COMMAND:-}" ] ; then
-        extra_query_command="${PACKAGE_EXTRA_QUERY_COMMAND}"
-    fi
-
-    installed_extra_pkgs="$(eval "${extra_query_command}")"
-    pf echo "${installed_extra_pkgs}" | grep "${extra_pkg}" 1>&2
-}
-
 install_pkg()
 {
     pkg="${1}"
     eval "${PACKAGE_INSTALL_COMMAND} ${pkg}" 1>&2
 }
 
-install_extra_pkg()
-{
-    extra_pkg="${1}"
-
-    extra_install_command="${PACKAGE_INSTALL_COMMAND}"
-    if [ -n "${PACKAGE_EXTRA_QUERY_COMMAND:-}" ] ; then
-        extra_install_command="${PACKAGE_EXTRA_INSTALL_COMMAND}"
-    fi
-
-    eval "${extra_install_command} ${extra_pkg}" 1>&2
-}
-
 find_wine()
 {
-    if command -v /opt/wine-staging/bin/wine ; then
-        true
-    elif command -v wine ; then
+    if command -v wine ; then
         true
     else
         false
@@ -447,12 +335,12 @@ find_wine()
 install_wine()
 {
     if ! find_wine ; then
-        err "wine-staging is not installed, attempting to install wine-staging..."
-        if install_pkg wine-staging ; then
+        err "wine is not installed, attempting to install wine..."
+        if install_pkg wine ; then
             find_wine
         else
             error_exit "$(cat <<EOF
-Unable to install wine-staging, determine how to install it on your distro!
+Unable to install wine, determine how to install it on your distro!
 winehq-* packages are not recommended, but may be the best option on your distro.
 EOF
             )"
@@ -475,9 +363,110 @@ patch_winetricks()
     fi
 }
 
+# https://forum.enb-emulator.com/index.php?/topic/66-linuxmaybe-macwine-install-guide/&do=findComment&comment=91573
+# "If you foolishly installed EnB into program files directory"
+#                                      - karu
+#
+# LOL - I took this advice initially while following Nimsy's excellent instructions and all I have to say is that if you
+# change these paths you will suffer FAR more than if you leave them alone and deal with the Windows-centric spaces via
+# proper quoting or escaping with backslashes.
+#
+# ${N7_INSTALL_EXE} is hard-coded to look for this path
+# - It won't find your EnB install and won't offer to update it if EnB is not in the default location (though I
+#   ultimately opted to use the more reliable and comprehensive ${N7_LAUNCHER_EXE} update process)
+# ${N7_LAUNCHER_EXE} is hard-coded to look for the default paths for ClientPath, EnBConfigPath, and CharCreatorPath
+# - If you change it you will have to re-browse to the ${ENB_CLIENT_EXE} every time there's an update (several times in
+#   a row the first time you install) because it will miraculously forget the location (and all of your other settings)
+#   every time there's an update (sigh - I implemented a workaround to restore your previous settings each time the
+#   launcher is started)
+# - As far as I can tell there is NO WAY to:
+#   - pre-create a config file for it
+#   - pass configuration options on the command-line
+#   - Change ClientPath to a different value even temporarily if the default location exists; ${N7_LAUNCHER_EXE} will
+#     just silently replace whatever you set ClientPath to with the default
+#   - Change EnBConfigPath or CharCreatorPath; they don't get replaced, but they also don't do anything
+#     - If the Character and Starship Creator is not in its default location the Tools menu entry for it will be broken.
+#       No amount of changing the user.config can change that.
+#       - Even when the Tools menu works for it though, it won't work on Linux because it isn't run with the correct
+#         working directory (which is why I was trying to point CharCreatorPath at a script)
+#       - Luckily I was able to work around this by replacing the executable itself with a script of the same name (see
+#         ${CSC_REDIRECT_EXE})
+#     - The workaround I used for the Character and Starship Creator doesn't work for the config executables because
+#       ${N7_LAUNCHER_EXE} will clobber them on every update so we're stuck with the default config exe from the Tools
+#       menu.
+#     - I added an enb-cfg script as a shortcut to start the improved ${CFG_EXE} application.
+BIN_DIR="${HOME}/.local/bin"
+APP_DIR="${HOME}/.local/share/applications/wine/Programs"
+MENU_DIR="${HOME}/.config/menus/applications-merged"
+
+ENB_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/EA GAMES/Earth & Beyond"
+ENB_WINE_INSTALL_PATH='C:\\Program Files\\EA GAMES\\Earth & Beyond'
+ENB_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_PATH} Install"
+ENB_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_PATH}' Install'
+ENB_LINK="${BIN_DIR}/enb"
+ENB_CLIENT_EXE='client.exe'
+# shellcheck disable=SC1003
+ENB_WINE_CLIENT_PATH_EXE=${ENB_WINE_INSTALL_PATH}'\\release\\'${ENB_CLIENT_EXE}
+ENB_CLIENT_INSTALL_EXE='eandb_demo.exe'
+ENB_CLIENT_DL="${ENB_LINUX_INSTALL_SOURCE}/${ENB_CLIENT_INSTALL_EXE}"
+ENB_APP_DIR="${APP_DIR}/EA GAMES/Earth & Beyond"
+
+DEMO_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/demo"
+DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
+
+N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/Net-7"
+N7_WINE_INSTALL_PATH='C:\\Program Files\\Net-7'
+N7_LINUX_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
+N7_LAUNCHER_EXE='LaunchNet7.exe'
+N7_LAUNCHER_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_LAUNCHER_EXE}_wine_launcher.sh"
+N7_PROXY_EXE='net7proxy.exe'
+N7_PROXY_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_PROXY_EXE}_wine_launcher.sh"
+N7_LAUNCHER_LINK="${BIN_DIR}/enb-launcher"
+N7_INSTALL_EXE='Net-7_Install.exe'
+N7_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_INSTALL_EXE}"
+N7_SERVER_HOSTNAME="sunrise.net-7.org"
+N7_CERT_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_SERVER_HOSTNAME}.crt"
+N7_APP_DIR="${APP_DIR}/Net-7 Entertainment/EnB Emulator"
+
+CFG_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/EBCONFIG"
+CFG_WINE_INSTALL_PATH=${ENB_WINE_INSTALL_PATH}'\\EBCONFIG'
+CFG_LINK="${BIN_DIR}/enb-cfg"
+CFG_EXE='net7config.exe'
+CFG_SCRIPT="${CFG_LINUX_INSTALL_PATH}/${CFG_EXE}_wine_launcher.sh"
+CFG_LINUX_EXECUTABLE="${CFG_LINUX_INSTALL_PATH}/E&BConfig.exe"
+
+CSC_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/csc"
+CSC_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\csc'
+CSC_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/Character and Starship Creator"
+CSC_LINUX_AVATAR_PATH="${WINEPREFIX}/drive_c/ProgramData/Westwood Studios/Earth and Beyond/Character and Starship Creator"
+CSC_WINE_INSTALL_PATH=${ENB_WINE_INSTALL_PATH}'\\Character and Starship Creator'
+CSC_LINK="${BIN_DIR}/enb-csc"
+CSC_LINUX_EXE='Character and Starship Creator.exe'
+CSC_LINUX_PATH_EXE="${CSC_LINUX_INSTALL_PATH}/${CSC_LINUX_EXE}"
+CSC_REDIRECT_EXE='CnSC.exe'
+CSC_SCRIPT="${ENB_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}_wine_launcher.sh"
+CSC_INSTALL_EXE='CharacterStarshipCreator.exe'
+CSC_DL="${CSC_LINUX_INSTALL_SOURCE}/${CSC_INSTALL_EXE}"
+
 banner 'UNOFFICIAL LINUX INSTALL SCRIPT FOR THE NET-7 EARTH & BEYOND EMULATOR'
 
 banner 'WINE AND DEPENDENCIES INSTALL'
+
+out "Check for multilib"
+if [ -n "${ID_LIKE_ARCH:-}" ]; then
+    if ! grep '^\[multilib\]' /etc/pacman.conf ; then
+        error_exit "$(cat << EOF
+On Arch and derivatives the multilib repo must be enabled to install wine!
+
+This is a significant change to the OS and therefore not automatic; enable
+multilib as documented below and then re-run this script:
+
+https://wiki.archlinux.org/title/Official_repositories#Enabling_multilib
+EOF
+)"
+    fi
+fi
+echo
 
 out "Check for direct rendering"
 if ! pf glxinfo | grep 'direct rendering: Yes' ; then
@@ -494,16 +483,16 @@ EOF
 fi
 echo
 
-out "Check for wine-staging"
+out "Check for wine"
 WINE_EXEC=$(install_wine)
 echo
 
 out "Check for wine-gecko (needed by ${N7_LAUNCHER_EXE})"
-if ! is_extra_pkg_installed wine-gecko ; then
+if ! is_pkg_installed wine-gecko ; then
     out "wine-gecko is not installed, attempting to install wine-gecko..."
-    install_extra_pkg wine-gecko || true
+    install_pkg wine-gecko || true
 
-    if ! is_extra_pkg_installed wine-gecko ; then
+    if ! is_pkg_installed wine-gecko ; then
         # failing to find a wine-gecko package, preload the msi installer in the wine cache
         GECKO_VERSION="$(curl --fail --silent --show-error --location \
             'https://source.winehq.org/git/wine.git/blob_plain/HEAD:/dlls/appwiz.cpl/addons.c' \
@@ -631,7 +620,7 @@ echo
 out "Check for Earth & Beyond Client download"
 if [ ! -e "${ENB_CLIENT_DL}" ] ; then
     out "Downloading Earth & Beyond Client"
-    download "http://www.bothouse.com/enb/${ENB_CLIENT_INSTALL_EXE}" "${ENB_CLIENT_DL}"
+    download "https://downloads.net-7.org/${ENB_CLIENT_INSTALL_EXE}" "${ENB_CLIENT_DL}"
 fi
 echo
 
@@ -706,13 +695,13 @@ banner 'Net-7 Entertainment Install'
 out "Check for Net-7 Unified Installer"
 if [ ! -e "${N7_DL}" ] ; then
     out "Downloading Net-7 Unified Installer"
-    download "https://www.net-7.org/download/${N7_INSTALL_EXE}" "${N7_DL}"
+    download "https://downloads.net-7.org/${N7_INSTALL_EXE}" "${N7_DL}"
 fi
 echo
 
 out "Verify download of Net-7 Unified Installer (could take a moment)"
 echo "NOTE: the checksum may change due to Net-7 updates so we don't validate the checksum here."
-printf "For reference sha256sum was (2023-09-30):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
+printf "For reference sha256sum was (2024-12-15):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
 ls -l "${N7_DL}"
 checksum "${N7_DL}"
 chmod a+x "${N7_DL}"
@@ -751,7 +740,7 @@ load_${N7_WINETRICKS_VERB_NAME}()
         Run \"${ENB_WINE_INSTALL_SOURCE}/${N7_INSTALL_EXE}\" /S /D=\"${N7_WINE_INSTALL_PATH}\"
         WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"\.NET 2\.0 or better already installed!\")
         ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your version of Windows is Windows XP, your installation will continue now\. we just needed to determine the version to determine if you need special privileges because you're on a system that has User Account Control\. \(UAC\)\")
+        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your version of Windows is Windows .*, your installation will continue now\. we just needed to determine the version to determine if you need special privileges because you're on a system that has User Account Control\. \(UAC\)\")
         ControlClick, OK        ; Button1
         WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"User "".*"" is in the Administrators group.*Original non-restricted account type: Admin\")
         ControlClick, OK        ; Button1
@@ -802,7 +791,7 @@ banner 'Character and Starship Creator Install'
 out "Check for Character and Starship Creator"
 if [ ! -e "${CSC_DL}" ] ; then
     out "downloading Character and Starship Creator"
-    download "http://www.bothouse.com/enb/${CSC_INSTALL_EXE}" "${CSC_DL}"
+    download "https://downloads.net-7.org/${CSC_INSTALL_EXE}" "${CSC_DL}"
 fi
 echo
 
@@ -866,7 +855,7 @@ echo
 
 out "Verify retrieval of ${N7_SERVER_HOSTNAME} SSL certificate"
 echo "NOTE: the checksum will change every 3 months as the SSL cert is updated so we don't validate the checksum here."
-printf "For reference sha256sum was (2023-09-30):\n4516f8c965e9ebdfd02425ae359f7af61fc67e92d4bec71d01c57719bcc16313\n"
+printf "For reference sha256sum was (2024-12-15):\n65a77decd240ce47962e78089097073d153f0962bb114749ccf267d11e1d93c0\n"
 ls -l "${N7_CERT_DL}"
 checksum "${N7_CERT_DL}"
 echo
@@ -1040,14 +1029,14 @@ get_config_value()
 # multiboxing.
 #
 # Migrate all the settings over from the previous config file (so settings are no longer lost on updates)
-if [ -d \"${N7_LINUX_CONFIG_PATH}\" ] ; then
-    N7_LATEST_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
+if [ -d "${N7_LINUX_CONFIG_PATH}" ] ; then
+    N7_LATEST_USER_CONFIG=\$(find "${N7_LINUX_CONFIG_PATH}" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
     N7_LATEST_USER_CONFIG_SEEN="\$(dirname "\${N7_LATEST_USER_CONFIG}")/.\$(basename "\${N7_LATEST_USER_CONFIG}").seen"
     if [ -n "\${N7_LATEST_USER_CONFIG}" ] && [ ! -e "\${N7_LATEST_USER_CONFIG_SEEN}" ] ; then
         echo "Configuring new '\${N7_LATEST_USER_CONFIG}'"
 
         # we'll look at this later but we want to identify it before we start modifying N7_LATEST_USER_CONFIG
-        N7_PREV_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n" | sort | cut -d' ' -f2 | tail -n2 | sed '1!d')
+        N7_PREV_USER_CONFIG=\$(find "${N7_LINUX_CONFIG_PATH}" -type f -name user.config -printf "%T+ %p\\n" | sort | cut -d' ' -f2 | tail -n2 | sed '1!d')
 
         # ClientPath
         update_or_add_config_setting "\${N7_LATEST_USER_CONFIG}" ClientPath "${ENB_WINE_CLIENT_PATH_EXE}"
@@ -1212,8 +1201,8 @@ launch()
     DISABLE_MOUSE_LOCK="" # = False
     USE_EXPERIMENTAL_PROTOTYPE_REORDER="/EXREORDER" # = True
     USE_PACKET_OPTIMIZATION="/POPT" # = True
-    if [ -d \"${N7_LINUX_CONFIG_PATH}\" ] ; then
-        N7_LATEST_USER_CONFIG=\$(find \"${N7_LINUX_CONFIG_PATH}\" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
+    if [ -d "${N7_LINUX_CONFIG_PATH}" ] ; then
+        N7_LATEST_USER_CONFIG=\$(find "${N7_LINUX_CONFIG_PATH}" -type f -name user.config -printf "%T+ %p\\n"| sort | cut -d' ' -f2 | tail -n1)
         if [ -f "\${N7_LATEST_USER_CONFIG}" ] ; then
             DISABLE_MOUSE_LOCK_SETTING="\$(grep -A1 DisableMouseLock "\${N7_LATEST_USER_CONFIG}" || true)"
             if [ -n "\${DISABLE_MOUSE_LOCK_SETTING}" ] ; then
