@@ -487,6 +487,20 @@ out "Check for wine"
 WINE_EXEC=$(install_wine)
 echo
 
+out "Check for lib32-gnutls"
+if ! is_pkg_installed lib32-gnutls ; then
+    out "lib32-gnutls is not installed, attempting to install lib32-gnutls..."
+    install_pkg lib32-gnutls || true
+
+    if ! is_pkg_installed lib32-gnutls ; then
+        err "$(cat <<EOF
+Unable to install lib32-gnutls, determine how to install lib32-gnutls on your distro (or what is necessary to get secur32 schannel support)!
+EOF
+)"
+    fi
+fi
+echo
+
 out "Check for wine-gecko (needed by ${N7_LAUNCHER_EXE})"
 if ! is_pkg_installed wine-gecko ; then
     out "wine-gecko is not installed, attempting to install wine-gecko..."
