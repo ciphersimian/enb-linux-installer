@@ -49,10 +49,10 @@
 #
 # The goal was to fundamentally support all popular Linux distros (ID_LIKE arch, debian, gentoo, rhel, or suse) so the
 # package management is abstracted, though it was only tested (and therefore, only works) on Manjaro (rolling release
-# based on arch) on 2024-12-15 with:
+# based on arch) on 2025-02-25 with:
 #
 # $ wine --version
-# wine-9.20
+# wine-10.0
 #
 # Limitations & Troubleshooting
 # =============================
@@ -371,9 +371,6 @@ patch_winetricks()
 # change these paths you will suffer FAR more than if you leave them alone and deal with the Windows-centric spaces via
 # proper quoting or escaping with backslashes.
 #
-# ${N7_INSTALL_EXE} is hard-coded to look for this path
-# - It won't find your EnB install and won't offer to update it if EnB is not in the default location (though I
-#   ultimately opted to use the more reliable and comprehensive ${N7_LAUNCHER_EXE} update process)
 # ${N7_LAUNCHER_EXE} is hard-coded to look for the default paths for ClientPath, EnBConfigPath, and CharCreatorPath
 # - If you change it you will have to re-browse to the ${ENB_CLIENT_EXE} every time there's an update (several times in
 #   a row the first time you install) because it will miraculously forget the location (and all of your other settings)
@@ -414,15 +411,15 @@ ENB_APP_DIR="${APP_DIR}/EA GAMES/Earth & Beyond"
 DEMO_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/demo"
 DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
 
-N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/Net-7"
-N7_WINE_INSTALL_PATH='C:\\Program Files\\Net-7'
+N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7Install"
+N7_WINE_INSTALL_PATH="C:\\users\\${USER}\\AppData\\Local\\LaunchNet7Install"
 N7_LINUX_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
 N7_LAUNCHER_EXE='LaunchNet7.exe'
 N7_LAUNCHER_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_LAUNCHER_EXE}_wine_launcher.sh"
 N7_PROXY_EXE='net7proxy.exe'
 N7_PROXY_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_PROXY_EXE}_wine_launcher.sh"
 N7_LAUNCHER_LINK="${BIN_DIR}/enb-launcher"
-N7_INSTALL_EXE='Net-7_Install.exe'
+N7_INSTALL_EXE='net-7_install.exe'
 N7_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_INSTALL_EXE}"
 N7_SERVER_HOSTNAME="sunrise.net-7.org"
 N7_CERT_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_SERVER_HOSTNAME}.crt"
@@ -431,7 +428,7 @@ N7_APP_DIR="${APP_DIR}/Net-7 Entertainment/EnB Emulator"
 CFG_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/EBCONFIG"
 CFG_WINE_INSTALL_PATH=${ENB_WINE_INSTALL_PATH}'\\EBCONFIG'
 CFG_LINK="${BIN_DIR}/enb-cfg"
-CFG_EXE='net7config.exe'
+CFG_EXE='E&BConfig.exe'
 CFG_SCRIPT="${CFG_LINUX_INSTALL_PATH}/${CFG_EXE}_wine_launcher.sh"
 CFG_LINUX_EXECUTABLE="${CFG_LINUX_INSTALL_PATH}/E&BConfig.exe"
 
@@ -635,6 +632,7 @@ out "Check for Earth & Beyond Client download"
 if [ ! -e "${ENB_CLIENT_DL}" ] ; then
     out "Downloading Earth & Beyond Client"
     download "https://downloads.net-7.org/${ENB_CLIENT_INSTALL_EXE}" "${ENB_CLIENT_DL}"
+    sync
 fi
 echo
 
@@ -715,7 +713,7 @@ echo
 
 out "Verify download of Net-7 Unified Installer (could take a moment)"
 echo "NOTE: the checksum may change due to Net-7 updates so we don't validate the checksum here."
-printf "For reference sha256sum was (2024-12-15):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
+printf "For reference sha256sum was (2025-02-25):\n55c343864ba083e7c8ddaa1cc5fc083b688c5fafe016381aed77db519a579e08\n"
 ls -l "${N7_DL}"
 checksum "${N7_DL}"
 chmod a+x "${N7_DL}"
@@ -751,52 +749,23 @@ load_${N7_WINETRICKS_VERB_NAME}()
 
         SetWinDelay 1000        ; wait extra second after each winwait
         SetTitleMatchMode, RegEx
-        Run \"${ENB_WINE_INSTALL_SOURCE}/${N7_INSTALL_EXE}\" /S /D=\"${N7_WINE_INSTALL_PATH}\"
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"\.NET 2\.0 or better already installed!\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your version of Windows is Windows .*, your installation will continue now\. we just needed to determine the version to determine if you need special privileges because you're on a system that has User Account Control\. \(UAC\)\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"User "".*"" is in the Administrators group.*Original non-restricted account type: Admin\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"We will now test to see if this is a 32 bit or 64 bit system, 64 bit systems require that the registry keys installed by the client are copied to a second location\.\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your system is 32-bit, no additional registry keys are required\.\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Game Client detected\. Would you like to update it?\")
-        ControlClick, No        ; Button2 (Yes - Button1)
-
-        ; I opted to stop using enb_up.exe and just let the launcher handle updates; this application seems to
-        ; frequently SIGSEGV and it seems to take about the same amount of time either way, the launcher is just more
-        ; reliable and can update you all the way to current, unlike this
-        ; RTPatch update (enb_up.exe) inside ${N7_INSTALL_EXE}
-        ;WinWaitActivate(\"EnB retail to latest patch ahk_exe enb_up.exe\", \"This patch should bring your installation to the latest known release\.\")
-        ; It works on Retail-CDs and Fileplanet-5-day-demo installations (actually they are identically).*cheers.*blasti99
-        ;ControlClick, OK        ; Button1 (Cancel - Button2)
-        ;WinWaitActivate(\"Locate System to Update ahk_exe enb_up.exe\")
-        ;ControlClick, Button2      ; &Open (Ampersand seems to cause problems with AHK) (Cancel - Button3, Help - Button4)
-
-        ;WinWaitActivate(\"RTPatch Software Update System ahk_exe enb_up.exe\", \"OK to perform update?\")
-        ;ControlClick, Yes       ; Button1 (Cancel - Button2, Change Options - ?)
-
-        ;WinWaitActivate(\"EnB retail to latest patch ahk_exe enb_up.exe\", \"congratulations\.\.\. your up to date now\")
-        ;ControlClick, OK        ; Button1
-
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"You have chosen not to install the patch, program will now complete and you'll have to patch with the launcher\.\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Last but not least, you must register your game accounts\. Hopefully you've done this already, but if not we'll go ahead and open the websites for you to do so\.\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Did you already register?\")
-        ControlClick, Yes       ; Button1
+        Run \"${ENB_WINE_INSTALL_SOURCE}/${N7_INSTALL_EXE}\"
+        WinWaitActivate(\"LaunchNet7 Setup ahk_exe ${N7_INSTALL_EXE}\", \"Welcome to LaunchNet7 Setup\")
+        ControlClick, &Next >     ; Button2
+        WinWaitActivate(\"LaunchNet7 Setup ahk_exe ${N7_INSTALL_EXE}\", \"License Agreement\")
+        ControlClick, I &Agree    ; Button2
+        WinWaitActivate(\"LaunchNet7 Setup ahk_exe ${N7_INSTALL_EXE}\", \"Choose Install Location\")
+        ControlClick, &Next >     ; Button2
+        WinWaitActivate(\"LaunchNet7 Setup ahk_exe ${N7_INSTALL_EXE}\", \"Choose Start Menu Folder\")
+        ControlClick, &Install    ; Button2
+        WinWaitActivate(\"LaunchNet7 Setup ahk_exe ${N7_INSTALL_EXE}\", \"Completing LaunchNet7 Setup\")
+        ControlClick, &Finish     ; Button2
     "
 }
 EOF
     output="$(WINEPREFIX=${WINEPREFIX} WINE="${WINE_EXEC}" ${WINETRICKS_EXEC} "${N7_WINETRICKS_VERB}" 2>&1)" || {
         rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
     }
-
-    # no longer needed as I decided to just skip enb_up.exe altogether due to it being buggy under wine (in general?)
-    # remove blasti99 login default
-    #rm --force "${ENB_LINUX_INSTALL_PATH}/Data/client/output/login.ini"
 fi
 echo
 
@@ -869,7 +838,7 @@ echo
 
 out "Verify retrieval of ${N7_SERVER_HOSTNAME} SSL certificate"
 echo "NOTE: the checksum will change every 3 months as the SSL cert is updated so we don't validate the checksum here."
-printf "For reference sha256sum was (2024-12-15):\n65a77decd240ce47962e78089097073d153f0962bb114749ccf267d11e1d93c0\n"
+printf "For reference sha256sum was (2025-02-25):\n8a94ee8be4d17897d4564fe7f367ac84067e880def47076b34ad32cf1afbe030\n"
 ls -l "${N7_CERT_DL}"
 checksum "${N7_CERT_DL}"
 echo
