@@ -49,18 +49,16 @@
 #
 # The goal was to fundamentally support all popular Linux distros (ID_LIKE arch, debian, gentoo, rhel, or suse) so the
 # package management is abstracted, though it was only tested (and therefore, only works) on Manjaro (rolling release
-# based on arch) on 2024-12-15 with:
+# based on arch) on 2025-08-02 with:
 #
 # $ wine --version
-# wine-9.20
+# wine-10.12
 #
 # Limitations & Troubleshooting
 # =============================
-# Earth & Beyond is a 32-bit game and therefore requires 32-bit support from video and audio drivers.  This is typically
-# not installed with drivers by default and is beyond the scope of this script as the exact packages needed will vary
-# widely depending on the hardware and drivers being used.  Typically it will require installing "lib32" versions of the
-# related drivers and you should be able to find information about this by searching for "lib32" and the related
-# manufacturer or "lib32" and alsa or pipewire, etc. depending on the audio stack you're using.
+# Earth & Beyond is a 32-bit game and therefore requires the [WoW64](https://en.wikipedia.org/wiki/WoW64)
+# support from WINE in recent versions. If you are using an older version of WINE see previous versions of
+# this repo where WINEARCH=win32 was used.
 #
 # This script will undoubtedly need tweaks on other distros and probably even on other Manjaro systems (I have multiple
 # and the process for each varied based on what had been installed and how it was configured previously).  I tried to
@@ -85,9 +83,9 @@
 # manual intervention) like downloading and installing various components.  If something didn't work and you have
 # corrected other things since it may be useful to remove/uninstall prior portions so the script will run them again.
 #
-# MacOS (Darwin) is not supported on account of Apple's ongoing attempts to kill OpenGL in favor of Metal and the
-# difficulty/inability of running a 32-bit WINE prefix.  If you can produce steps for reliably installing and running on
-# recent MacOS versions open an issue and I will consider including them.
+# MacOS (Darwin) is not supported on account of Apple's ongoing attempts to kill OpenGL in favor of Metal and
+# the difficulty/inability of running 32-bit applications there.  If you can produce steps for reliably
+# installing and running on recent MacOS versions open an issue and I will consider including them.
 
 set -o errexit  # -e exit on command errors (so you MUST handle exit codes properly!)
 set -o nounset  # -u treat unset variables as an error and exit immediately
@@ -414,8 +412,8 @@ ENB_APP_DIR="${APP_DIR}/EA GAMES/Earth & Beyond"
 DEMO_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/demo"
 DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
 
-N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files/Net-7"
-N7_WINE_INSTALL_PATH='C:\\Program Files\\Net-7'
+N7_LINUX_INSTALL_PATH="${WINEPREFIX}/drive_c/Program Files (x86)/Net-7"
+N7_WINE_INSTALL_PATH='C:\\Program Files (x86)\\Net-7'
 N7_LINUX_CONFIG_PATH="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LaunchNet7"
 N7_LAUNCHER_EXE='LaunchNet7.exe'
 N7_LAUNCHER_SCRIPT="${N7_LINUX_INSTALL_PATH}/bin/${N7_LAUNCHER_EXE}_wine_launcher.sh"
@@ -425,7 +423,6 @@ N7_LAUNCHER_LINK="${BIN_DIR}/enb-launcher"
 N7_INSTALL_EXE='Net-7_Install.exe'
 N7_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_INSTALL_EXE}"
 N7_SERVER_HOSTNAME="sunrise.net-7.org"
-N7_CERT_DL="${ENB_LINUX_INSTALL_SOURCE}/${N7_SERVER_HOSTNAME}.crt"
 N7_APP_DIR="${APP_DIR}/Net-7 Entertainment/EnB Emulator"
 
 CFG_LINUX_INSTALL_PATH="${ENB_LINUX_INSTALL_PATH}/EBCONFIG"
@@ -487,20 +484,6 @@ out "Check for wine"
 WINE_EXEC=$(install_wine)
 echo
 
-out "Check for lib32-gnutls"
-if ! is_pkg_installed lib32-gnutls ; then
-    out "lib32-gnutls is not installed, attempting to install lib32-gnutls..."
-    install_pkg lib32-gnutls || true
-
-    if ! is_pkg_installed lib32-gnutls ; then
-        err "$(cat <<EOF
-Unable to install lib32-gnutls, determine how to install lib32-gnutls on your distro (or what is necessary to get secur32 schannel support)!
-EOF
-)"
-    fi
-fi
-echo
-
 out "Check for wine-gecko (needed by ${N7_LAUNCHER_EXE})"
 if ! is_pkg_installed wine-gecko ; then
     out "wine-gecko is not installed, attempting to install wine-gecko..."
@@ -550,7 +533,7 @@ echo
 
 out "Create WINEPREFIX"
 # WINEDLLOVERRIDES=mscoree=d prevents mono install during prefix creation
-output=$(WINEPREFIX="${WINEPREFIX}" WINEARCH=win32 WINEDLLOVERRIDES=mscoree=d "$(dirname "${WINE_EXEC}")/wineboot" 2>&1) || {
+output=$(WINEPREFIX="${WINEPREFIX}" WINEDLLOVERRIDES=mscoree=d "$(dirname "${WINE_EXEC}")/wineboot" 2>&1) || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
@@ -714,10 +697,13 @@ fi
 echo
 
 out "Verify download of Net-7 Unified Installer (could take a moment)"
-echo "NOTE: the checksum may change due to Net-7 updates so we don't validate the checksum here."
-printf "For reference sha256sum was (2024-12-15):\n60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb\n"
-ls -l "${N7_DL}"
-checksum "${N7_DL}"
+if ! checksum "${N7_DL}" '60fd2d09a7cf00138b2d122490d16d3802031c056277702cf5b160636fa544eb' ; then
+    error_exit "$(cat <<EOF
+The sha265sum of '${N7_DL}' is invalid!
+This could be dangerous; it could be an incomplete/corrupted download or tampering, check the file. It could also just mean the installer was updated and this script needs to be updated as well to be compatible.
+EOF
+)"
+fi
 chmod a+x "${N7_DL}"
 echo
 
@@ -760,28 +746,7 @@ load_${N7_WINETRICKS_VERB_NAME}()
         ControlClick, OK        ; Button1
         WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"We will now test to see if this is a 32 bit or 64 bit system, 64 bit systems require that the registry keys installed by the client are copied to a second location\.\")
         ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your system is 32-bit, no additional registry keys are required\.\")
-        ControlClick, OK        ; Button1
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Game Client detected\. Would you like to update it?\")
-        ControlClick, No        ; Button2 (Yes - Button1)
-
-        ; I opted to stop using enb_up.exe and just let the launcher handle updates; this application seems to
-        ; frequently SIGSEGV and it seems to take about the same amount of time either way, the launcher is just more
-        ; reliable and can update you all the way to current, unlike this
-        ; RTPatch update (enb_up.exe) inside ${N7_INSTALL_EXE}
-        ;WinWaitActivate(\"EnB retail to latest patch ahk_exe enb_up.exe\", \"This patch should bring your installation to the latest known release\.\")
-        ; It works on Retail-CDs and Fileplanet-5-day-demo installations (actually they are identically).*cheers.*blasti99
-        ;ControlClick, OK        ; Button1 (Cancel - Button2)
-        ;WinWaitActivate(\"Locate System to Update ahk_exe enb_up.exe\")
-        ;ControlClick, Button2      ; &Open (Ampersand seems to cause problems with AHK) (Cancel - Button3, Help - Button4)
-
-        ;WinWaitActivate(\"RTPatch Software Update System ahk_exe enb_up.exe\", \"OK to perform update?\")
-        ;ControlClick, Yes       ; Button1 (Cancel - Button2, Change Options - ?)
-
-        ;WinWaitActivate(\"EnB retail to latest patch ahk_exe enb_up.exe\", \"congratulations\.\.\. your up to date now\")
-        ;ControlClick, OK        ; Button1
-
-        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"You have chosen not to install the patch, program will now complete and you'll have to patch with the launcher\.\")
+        WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Your system is 64-bit, some additional registry keys will be required\.\")
         ControlClick, OK        ; Button1
         WinWaitActivate(\"Net-7 - Emulator Setup ahk_exe ${N7_INSTALL_EXE}\", \"Last but not least, you must register your game accounts\. Hopefully you've done this already, but if not we'll go ahead and open the websites for you to do so\.\")
         ControlClick, OK        ; Button1
@@ -858,30 +823,10 @@ if [ ! -e "${CSC_LINUX_PATH_EXE}" ] ; then
     echo
 fi
 
-banner 'CERTIFICATE INSTALL AND CONFIGURATION'
+banner 'REGISTRY CONFIGURATION'
 
-out "Check for the ${N7_SERVER_HOSTNAME} SSL certificate"
-if [ ! -e "${N7_CERT_DL}" ] ; then
-    out "Retrieving ${N7_SERVER_HOSTNAME} SSL certificate"
-    pf openssl s_client -showcerts -connect "${N7_SERVER_HOSTNAME}:443" </dev/null 2>/dev/null | openssl x509 -outform PEM >"${N7_CERT_DL}"
-fi
-echo
-
-out "Verify retrieval of ${N7_SERVER_HOSTNAME} SSL certificate"
-echo "NOTE: the checksum will change every 3 months as the SSL cert is updated so we don't validate the checksum here."
-printf "For reference sha256sum was (2024-12-15):\n65a77decd240ce47962e78089097073d153f0962bb114749ccf267d11e1d93c0\n"
-ls -l "${N7_CERT_DL}"
-checksum "${N7_CERT_DL}"
-echo
-
-# convert the certificate to DER format, add the appropriate header, and write out a .reg file to a temporary location
-out "Install the ${N7_SERVER_HOSTNAME} SSL certificate into the WINEPREFIX"
-# Trailing linefeed added literally
-NEWLINE='
-'
-DER_CERT_HEX="$(pf openssl x509 -in "${N7_CERT_DL}" -outform der | pf od -A n -v -t x1 | pf tr ' ' ',' | pf sed 's/^,/  /g' | pf sed 's/$/,\\/g' | sed '$ s/..$//')"
-DER_CERT_REG="$(mktemp /tmp/${N7_SERVER_HOSTNAME}.XXXXXXXXXX.reg)"
-add_exit_cmd "rm -f ${DER_CERT_REG}"
+REGISTRY_CONFIG="$(mktemp /tmp/XXXXXXXXXX.reg)"
+add_exit_cmd "rm -f ${REGISTRY_CONFIG}"
 
 # 1920x1080
 # This is the most common resolution in the U.S. but not 4:3 and EnB is a strictly 4:3 aspect ratio game so it will be
@@ -907,18 +852,19 @@ add_exit_cmd "rm -f ${DER_CERT_REG}"
 # 1856x1392
 #"RenderDeviceWidth"=dword:00000740
 #"RenderDeviceHeight"=dword:00000570
-cat <<EOF > "${DER_CERT_REG}"
+cat <<EOF > "${REGISTRY_CONFIG}"
 Windows Registry Editor Version 5.00
 
-[HKEY_LOCAL_MACHINE\\Software\\Westwood Studios]
+; 64-bit Prefix
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios]
 
-[HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond]
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios\\Earth and Beyond]
 
-[HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Registration]
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios\\Earth and Beyond\\Registration]
 "Enabled"=dword:00000000
 "Registered"=dword:00000001
 
-[HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Render]
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios\\Earth and Beyond\\Render]
 "EBConfigVersion"=dword:0000000b
 "LandLOD"=dword:00000007
 "LandPolyBudget"=dword:00006d60
@@ -934,20 +880,15 @@ Windows Registry Editor Version 5.00
 "TextureFilter"=dword:00000002
 "TextureReduction"=dword:00000000
 
-[HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Sound]
+[HKEY_LOCAL_MACHINE\\Software\\Wow6432Node\\Westwood Studios\\Earth and Beyond\\Sound]
 "cinematic enabled"=dword:00000001
 "dialog enabled"=dword:00000001
 "music enabled"=dword:00000001
 "sound enabled"=dword:00000001
-
-[HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Root\\Certificates\\5A802C33F64374A3A9CCFA344B903966DEE7C263]
-"Blob"=hex:03,00,00,00,01,00,00,00,14,00,00,00,5a,80,2c,33,f6,43,74,a3,a9,cc,\\${NEWLINE}
-  fa,34,4b,90,39,66,de,e7,c2,63,20,00,00,00,01,00,00,00,2a,05,00,00,\\${NEWLINE}
-${DER_CERT_HEX}
 EOF
 
-# add the certificate .reg into the windows registry within the WINEPREFIX
-output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait regedit.exe "${DER_CERT_REG}" 2>&1) || {
+# add the .reg into the windows registry within the WINEPREFIX
+output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait regedit.exe "${REGISTRY_CONFIG}" 2>&1) || {
     rc="${?}"; err "rc: ${rc}, output: ${output}"; exit "${rc}"
 }
 echo
@@ -1535,7 +1476,13 @@ output="$(WINEPREFIX=${WINEPREFIX} WINE="${WINE_EXEC}" ${WINETRICKS_EXEC} "${N7_
 }
 echo
 
-out "Run Net-7 Config"
+out "Run Net-7 Configuration"
+out "1. Select your desired graphics settings and resolution"
+out "2. Press 'Test Performance...' and wait for the test to complete"
+out "3. Move the Net-7 Configuration window as the results tend to pop-up under it"
+out "4. Press 'OK' on the Information window showing the results"
+out "5. Press 'Apply' in the Net-7 Configuration window"
+out "6. Press 'OK' in the Net-7 Configuration window"
 WAIT=1 "${CFG_SCRIPT}"
 echo
 
